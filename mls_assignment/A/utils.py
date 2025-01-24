@@ -2,6 +2,7 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 import torch
 from torch.utils.data import DataLoader
+from torchvision import transforms
 
 # BloodMNIST dataset info
 # Data          | Shape
