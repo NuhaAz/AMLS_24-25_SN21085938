@@ -1,9 +1,10 @@
 from sklearn import svm
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.metrics import precision_score, recall_score, roc_auc_score, accuracy_score
 import numpy as np
 import torch.nn as nn
 import torch
+import torch.nn.init as init
 from torch.autograd import Variable
 
 
@@ -34,14 +35,14 @@ class CNN(nn.Module):
         
         # Convolutional Layers
         self.conv1 = nn.Sequential(
-            nn.Conv2d(1,20, kernel_size=5),
-            nn.BatchNorm2d(20),
+            nn.Conv2d(3,32, kernel_size=5),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2),
         )
         self.conv2 = nn.Sequential(
-            nn.Conv2d(20,100, kernel_size=5),
-            nn.BatchNorm2d(100),
+            nn.Conv2d(32,64, kernel_size=5),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2),
         )
@@ -49,19 +50,35 @@ class CNN(nn.Module):
         # Fully Connected Layers
         self.fc1 = nn.Sequential(
             nn.Dropout(p=dropout),
-            nn.Linear(100 * 4*4,100),
+            nn.Linear(64 * 4*4,512),
             nn.ReLU()
         )
         self.fc2 = nn.Sequential(
             nn.Dropout(p=dropout),
-            nn.Linear(100,100),
+            nn.Linear(512,256),
             nn.ReLU(),
         )
-        self.sigmoid = nn.Sequential(
+        self.fc3 = nn.Sequential(
             nn.Dropout(p=dropout),
-            nn.Linear(100,1),
-            nn.Sigmoid()
-            )
+            nn.Linear(256,128),
+            nn.ReLU(),
+        )
+        self.softmax = nn.Sequential(
+            nn.Linear(128, 8),
+            nn.Softmax(dim=1)
+        )
+        
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                init.kaiming_normal_(m.weight, nonlinearity='relu')
+                if m.bias is not None:
+                    init.constant_(m.bias, 0)
+            if isinstance(m, nn.Linear):
+                if m.out_features == 1:
+                    init.kaiming_normal_(m.weight, nonlinearity='softmax')
+                else:
+                    init.kaiming_normal_(m.weight, nonlinearity='relu')
         
     def forward(self, x):
         x = self.conv1(x)
@@ -71,7 +88,8 @@ class CNN(nn.Module):
         
         x = self.fc1(x)
         x = self.fc2(x)
-        x = self.sigmoid(x)
+        x = self.fc3(x)
+        x = self.softmax(x)
         return x
     
 # Train, Validation and Test Classes for CNN
@@ -104,20 +122,22 @@ class Trainer:
             self.optimizer.step()
             
             # Collect all labels and predictions for precision and AUC score
-            all_train_labels.extend(y_train.detach().numpy())
-            all_train_preds.extend(y_pred.detach().numpy())
+            # all_train_labels.extend(y_train.detach().numpy()
+            all_train_labels.extend(y_train.argmax(dim=1).detach().numpy())
+            # all_train_preds.extend(y_pred.detach().numpy())
+            all_train_preds.extend(y_pred.argmax(dim=1).detach().numpy())
         
         avg_train_loss = train_loss / len(self.train_loader)
-        train_precision = precision_score(all_train_labels, (np.array(all_train_preds) > 0.5).astype(float))
-        train_auc = roc_auc_score(all_train_labels, all_train_preds)
-        train_recall = recall_score(all_train_labels, (np.array(all_train_preds) > 0.5).astype(float))
+        train_accuracy = accuracy_score(all_train_labels, all_train_preds)
+        train_precision = precision_score(all_train_labels, all_train_preds, average='macro', zero_division=0)
+        train_recall = recall_score(all_train_labels, all_train_preds, average='macro',zero_division=1)
         
         if self.scheduler:
             self.scheduler.step()
             
-        print(f"Epoch {epoch+1}, Train Loss: {train_loss/len(self.train_loader)}, Train Precision: {train_precision}, Train Recall: {train_recall} Train AUC: {train_auc}")
+        # print(f"Epoch {epoch+1}, Train Loss: {train_loss/len(self.train_loader)}, Train Precision: {train_precision}, Train Recall: {train_recall}")
         
-        return avg_train_loss, train_precision, train_auc, all_train_labels, all_train_preds
+        return avg_train_loss, train_accuracy, train_precision, all_train_labels, all_train_preds
     
 class Validator:
     def __init__(self, model, val_loader, criterion):
@@ -143,17 +163,19 @@ class Validator:
                 val_loss += loss.item()
                 
                 # Collect all labels and predictions for precision and F1-score
-                all_val_labels.extend(y_val.detach().numpy())
-                all_val_preds.extend(y_pred.detach().numpy())
+                # all_val_labels.extend(y_val.detach().numpy())
+                all_val_labels.extend(y_val.argmax(dim=1).detach().numpy())
+                # all_val_preds.extend(y_pred.detach().numpy())
+                all_val_preds.extend(y_pred.argmax(dim=1).detach().numpy())
                 
         avg_val_loss = val_loss / len(self.val_loader)
-        val_precision = precision_score(all_val_labels, (np.array(all_val_preds) > 0.5).astype(float))
-        val_auc = roc_auc_score(all_val_labels, all_val_preds)
-        val_recall = recall_score(all_val_labels,(np.array(all_val_preds) > 0.5).astype(float))
+        val_accuracy = accuracy_score(all_val_labels, all_val_preds)
+        val_precision = precision_score(all_val_labels, all_val_preds, average='macro', zero_division=0)
+        val_recall = recall_score(all_val_labels, all_val_preds, average='macro', zero_division=1)
         
-        print(f"Epoch {epoch+1}, Val Loss: {val_loss/len(self.val_loader)}, Val Precision: {val_precision}, Val Recall: {val_recall} Val AUC: {val_auc}")
+        # print(f"Epoch {epoch+1}, Val Loss: {val_loss/len(self.val_loader)}, Val Precision: {val_precision}, Val Recall: {val_recall}")
         
-        return avg_val_loss, val_precision, val_auc, all_val_labels, all_val_preds
+        return avg_val_loss, val_accuracy, val_precision, all_val_labels, all_val_preds
     
 class Tester:
     def __init__(self, model, test_loader, criterion):
@@ -164,8 +186,9 @@ class Tester:
     def test(self, threshold=0.5):
         self.model.eval()
         test_loss = 0
-        all_test_labels = []
+        all_test_labels_ohe = []
         all_test_preds = []
+        all_test_probs = []
         
         with torch.no_grad():
             for i, (x_test, y_test) in enumerate(self.test_loader):
@@ -177,10 +200,13 @@ class Tester:
                 test_loss += loss.item()
 
                 # Collect all labels and predictions for precision and F1-score
-                all_test_labels.extend(y_test.detach().numpy())
-                all_test_preds.extend(y_pred.detach().numpy())
+                # all_test_labels.extend(y_test.argmax(dim=1).detach().numpy())
+                all_test_labels_ohe.extend(y_test.detach().numpy())
+                # all_test_preds.extend(y_pred.detach().numpy())
+                all_test_preds.extend(y_pred.argmax(dim=1).detach().numpy())
+                all_test_probs.extend(y_pred.detach().numpy())
                 
         avg_test_loss = test_loss / len(self.test_loader)
-        all_y_pred = (np.array(all_test_preds) > threshold).astype(float)
+        # all_y_pred = (np.array(all_test_preds) > threshold).astype(float)
         
-        return avg_test_loss, all_y_pred
+        return avg_test_loss, all_test_preds, all_test_probs, all_test_labels_ohe

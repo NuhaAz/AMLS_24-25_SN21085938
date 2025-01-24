@@ -2,6 +2,7 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 import torch
 from torch.utils.data import DataLoader
+from sklearn.preprocessing import OneHotEncoder
 
 # BloodMNIST dataset info
 # Data          | Shape
@@ -66,7 +67,14 @@ def reshape(data, setting):
     if setting == "x":
         data = torch.reshape(data, [length, 3, 28,28])
     elif setting == "y":
-        data = torch.reshape(data, [length, 3])
+        data = torch.reshape(data, [length, 1])
+        # Convert labels to one hot encoding to pass through CNN
+        data = onehotencode(data)
+    return data
+
+def onehotencode(data):
+    ohe = OneHotEncoder(handle_unknown='ignore', sparse_output=False).fit(data)
+    data = ohe.transform(data)
     return data
 
 # Prepare CNN dataset
